@@ -53,24 +53,29 @@ def get_fn_name_tokens(token_to_id: dict) -> dict:
 
 def generate_fn_name(
     model,
-    input_ids: list[int],
+    encoded_token_prompt_ids: list[int],
     valid_names: list[str],
-    fn_tokens: dict[int, str],
+    valid_tokens_for_name_func: dict[int, str],
 ) -> str:
     prefix = ""
-    current_ids = list(input_ids)
+    current_ids = list(encoded_token_prompt_ids)
 
     while prefix not in valid_names:
-        logits = model.get_logits_from_input_ids(current_ids)
+        print(prefix)
+        logits = model.get_logits_from_input_ids(encoded_token_prompt_ids)
 
         best_id = None
         best_logit = float("-inf")
+        oken_to_id, id_to_token = load_vocab(path)
 
-        for tid, token in fn_tokens.items():
+        for i, (tid, token) in enumerate(valid_tokens_for_name_func.items()):
             candidate = prefix + token
+            print("candidate",candidate) if i%1000 == 0 else None
             for name in valid_names:
                 if name.startswith(candidate):
                     if logits[tid] > best_logit:
+                        print("*"*50)
+                        print("tid", tid, "logits[tid]",logits[tid], "value:", id_to_token[tid])
                         best_logit = logits[tid]
                         best_id = tid
                     break
@@ -78,10 +83,16 @@ def generate_fn_name(
         if best_id is None:
             raise ValueError(f"No valid token found at prefix: {prefix!r}")
 
-        prefix += fn_tokens[best_id]
+        prefix += valid_tokens_for_name_func[best_id]
         current_ids.append(best_id)
 
-    return prefix
+    return prefix, current_ids
+
+def add_parameters_to_ids(model,  current_ids: list[int]):
+    output = f'", "parameters": {{'
+    tensor = model.encode(output)
+    new_ids = [int(x) for x in tensor[0]]
+    return current_ids + new_ids
 
 
 
@@ -92,24 +103,29 @@ if __name__ == "__main__":
     )
     functions_list = build_system_prompt(functions)
     formatted_functions = format_output(functions_list)
-    user_prompt = "Calculate the square root of 3"
+    user_prompt = " caluclate the root of 3"
     full_formatted_prompt = build_full_prompt(formatted_functions, user_prompt)
     print(build_full_prompt(formatted_functions, user_prompt))
 
     model = Small_LLM_Model()
     tensor = model.encode(full_formatted_prompt)
-    input_ids = [int(x) for x in tensor[0]]
+    encoded_token_prompt_ids = [int(x) for x in tensor[0]]
     path = model.get_path_to_vocab_file()
     token_to_id, id_to_token = load_vocab(path)
     print(dict(list(token_to_id.items())[:5]))
     print(dict(list(id_to_token.items())[:5]))
-    #print(input_ids[:5])
-    fn_tokens = get_fn_name_tokens(token_to_id)
-    print(f"Token validi per nomi funzione: {len(fn_tokens)}")
-    print(dict(list(fn_tokens.items())[:100]))
+    #print(encoded_token_prompt_ids[:5])
+    valid_tokens_for_name_func = get_fn_name_tokens(token_to_id)
+    print(f"Token validi per nomi funzione: {len(valid_tokens_for_name_func)}")
+    print(dict(list(valid_tokens_for_name_func.items())[:100]))
     print()
-    fn_tokens = get_fn_name_tokens(token_to_id)
-    fn_name = generate_fn_name(model, input_ids, [f.name for f in functions], fn_tokens)
+    """ 
+        for ids in encoded_token_prompt_ids:
+            print(ids, id_to_token[ids]) """
+    print(len(token_to_id))
+    print(len(valid_tokens_for_name_func))
+    fn_name, current_ids = generate_fn_name(model, encoded_token_prompt_ids, [f.name for f in functions], valid_tokens_for_name_func)
     print("Funzione scelta:", fn_name)
-
+    current_ids = add_parameters_to_ids(model, current_ids)
+    print(model.decode(current_ids))
 
