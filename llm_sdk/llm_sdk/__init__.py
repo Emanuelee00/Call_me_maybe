@@ -54,7 +54,11 @@ class Small_LLM_Model:
         self._device = device
 
         if dtype is None:
-            dtype = torch.float16 if self._device in ["cuda", "mps"] else torch.float32
+            dtype = (
+                torch.float16
+                if self._device in ["cuda", "mps"]
+                else torch.float32
+            )
         self._dtype = dtype
 
         # --- load tokenizer & model -------------------------------------------------
@@ -93,7 +97,9 @@ class Small_LLM_Model:
         """
         Given a list of input token ids, return the raw logits (no softmax) for the next token.
         """
-        input_tensor = torch.tensor([input_ids], device=self._device, dtype=torch.long)
+        input_tensor = torch.tensor(
+            [input_ids], device=self._device, dtype=torch.long
+        )
         with torch.no_grad():
             out = self._model(input_ids=input_tensor)
         # Get logits for the last token in the sequence for the batch (batch size 1)
@@ -104,7 +110,9 @@ class Small_LLM_Model:
         vocab_file_name = self._tokenizer.vocab_files_names.get(
             "vocab_file", "vocab.json"
         )
-        vocab_path = hf_hub_download(repo_id=self._model_name, filename=vocab_file_name)
+        vocab_path = hf_hub_download(
+            repo_id=self._model_name, filename=vocab_file_name
+        )
         return vocab_path
 
     def get_path_to_merges_file(self) -> str:

@@ -1,10 +1,12 @@
 .PHONY: install run debug clean lint lint-strict
 
+all: run
+
 install:
 	uv sync
 
-run:
-	uv run python -m src
+run: install
+	uv run python -m src $(ARGS)
 
 debug:
 	uv run python -m pdb -m src
