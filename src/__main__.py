@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import sys
 
 from llm_sdk import Small_LLM_Model
 
@@ -15,7 +16,8 @@ from .models import FunctionDefinition, Prompt
 from .utils import load_and_validate_definitions
 
 
-def parse_arguments():
+def parse_arguments() -> argparse.Namespace:
+    """Parse --functions_definition, --input and --output, with data/ defaults."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--functions_definition", default="data/input/functions_definition.json"
@@ -26,12 +28,18 @@ def parse_arguments():
     return args
 
 
-def main():
+def main() -> None:
+    """Run every test prompt through the pipeline and write the results as JSON."""
     args = parse_arguments()
-    functions = load_and_validate_definitions(
-        args.functions_definition, FunctionDefinition
-    )
-    prompts = load_and_validate_definitions(args.input, Prompt)
+
+    try:
+        functions = load_and_validate_definitions(
+            args.functions_definition, FunctionDefinition
+        )
+        prompts = load_and_validate_definitions(args.input, Prompt)
+    except ValueError as error:
+        print(f"Error: {error}")
+        sys.exit(1)
 
     functions_list = build_system_prompt(functions)
     formatted_functions = format_output(functions_list)
