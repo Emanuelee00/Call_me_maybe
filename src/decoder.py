@@ -1,10 +1,15 @@
 import json
 import re
+from typing import TYPE_CHECKING
 
-from .models import FunctionDefinition
+from .models import FunctionDefinition, ParameterSchema
+
+if TYPE_CHECKING:
+    from llm_sdk import Small_LLM_Model
 
 
-def load_vocab(path):
+def load_vocab(path: str) -> tuple[dict[str, int], dict[int, str]]:
+    """Load the tokenizer vocab file and return (token -> id, id -> token)."""
     with open(path) as f:
         token_to_id = json.load(f)
     id_to_token = {v: k for k, v in token_to_id.items()}
@@ -12,15 +17,16 @@ def load_vocab(path):
     return token_to_id, id_to_token
 
 
-
-def format_output(string: str) -> str:
+def format_output(functions_list: list[tuple[str, list[str], str, str]]) -> str:
+    """Render the functions built by build_system_prompt as a plain-text list."""
     lines = ["Available functions:"]
-    for name, params, description, return_type in string:
+    for name, params, description, return_type in functions_list:
         lines.append(f"- {name}({', '.join(params)}): {description}")
     return "\n".join(lines)
 
 
-def build_system_prompt(functions: list[FunctionDefinition]) -> list:
+def build_system_prompt(functions: list[FunctionDefinition]) -> list[tuple[str, list[str], str, str]]:
+    """Turn function definitions into (name, param descriptions, description, return type) tuples."""
     output = []
     for function in functions:
         output.append(
@@ -37,14 +43,16 @@ def build_system_prompt(functions: list[FunctionDefinition]) -> list:
     return output
 
 
-def build_full_prompt(formatted_system_prompt: str, user_prompt: str):
+def build_full_prompt(formatted_system_prompt: str, user_prompt: str) -> str:
+    """Append the user prompt and the opening of the expected JSON to the system prompt."""
     full_prompt = (
         formatted_system_prompt + f'\nUser: {user_prompt} \n JSON: {{"name": "'
     )
     return full_prompt
 
 
-def get_filtered_tokens_vocab(token_to_id:dict, regex: str | None = None):
+def get_filtered_tokens_vocab(token_to_id: dict[str, int], regex: str | None = None) -> dict[int, str]:
+    """Keep only the vocab tokens whose whole text matches the given character class."""
     result = {}
     for token, token_id in token_to_id.items():
         if re.match(f'^[{regex}]+$', token):
@@ -52,14 +60,13 @@ def get_filtered_tokens_vocab(token_to_id:dict, regex: str | None = None):
     return result
 
 
-
-
 def constrain_functions(
-    model,
+    model: "Small_LLM_Model",
     encoded_token: list[int],
     valid_names: list[str],
     valid_tokens_filter_dict: dict[int, str],
-) -> str:
+) -> tuple[str, list[int]]:
+    """Generate token by token until the result exactly matches one of valid_names."""
     prefix = ""
     current_ids = list(encoded_token)
 
@@ -83,19 +90,29 @@ def constrain_functions(
 
     return prefix, current_ids
 
-def masked_argmax(logits: list[float], candidate_ids) -> int:
+
+def masked_argmax(logits: list[float], candidate_ids: set[int]) -> int:
     """Pick the id with the highest logit, considering only candidate_ids."""
     return max(candidate_ids, key=lambda token_id: logits[token_id])
 
 
-def encode_to_ids(model, text: str) -> list[int]:
+def encode_to_ids(model: "Small_LLM_Model", text: str) -> list[int]:
     """Encode text and return it as a plain list of int token ids."""
     tensor = model.encode(text)
     ids = [int(x) for x in tensor[0]]
     return ids
 
-def constrain_number_parameters(model, encoded_tokens, valid_tokens_filter_dict, minus_token_id, stop_token_id, max_tokens=200):
-    generated = []
+
+def constrain_number_parameters(
+    model: "Small_LLM_Model",
+    encoded_tokens: list[int],
+    valid_tokens_filter_dict: dict[int, str],
+    minus_token_id: int,
+    stop_token_id: int,
+    max_tokens: int = 200,
+) -> list[int]:
+    """Generate a number or free-text string value, masked to valid chars, until the stop token wins."""
+    generated: list[int] = []
     stopped = False
 
     for _ in range(max_tokens):
@@ -120,17 +137,23 @@ def constrain_number_parameters(model, encoded_tokens, valid_tokens_filter_dict,
     return generated
 
 
-
-
-def get_regex_for_type(parameter):
+def get_regex_for_type(parameter: ParameterSchema) -> str:
+    """Character class allowed for this parameter's value (number chars, or anything but a quote)."""
     TYPE_REGEX = {
-    "number": "0-9.",
-    "string": '^"',
+        "number": "0-9.",
+        "string": '^"',
     }
 
     return TYPE_REGEX[parameter.type]
 
-def generate_parameters(model, encoded_tokens, parameters, token_to_id):
+
+def generate_parameters(
+    model: "Small_LLM_Model",
+    encoded_tokens: list[int],
+    parameters: dict[str, ParameterSchema],
+    token_to_id: dict[str, int],
+) -> list[int]:
+    """Append every parameter's key and constrained value to encoded_tokens, then close the object."""
     encoded_comma_and_space = encode_to_ids(model, ', ')
     encoded_end = encode_to_ids(model, '}}')
     encoded_quotes = encode_to_ids(model, '"')
@@ -158,18 +181,27 @@ def generate_parameters(model, encoded_tokens, parameters, token_to_id):
             if parameter.type == "string":
                 encoded_tokens.extend(encoded_quotes)
 
-        if i < len(parameters) -1:
+        if i < len(parameters) - 1:
             encoded_tokens.extend(encoded_comma_and_space)
     encoded_tokens.extend(encoded_end)
     return encoded_tokens
 
-def add_parameters_to_ids(model,  current_ids: list[int]):
+
+def add_parameters_to_ids(model: "Small_LLM_Model", current_ids: list[int]) -> list[int]:
+    """Open the "parameters" object in the JSON being built."""
     new_ids = encode_to_ids(model, '", "parameters" : {')
     return current_ids + new_ids
 
 
-
-def process_prompt(model, token_to_id, functions, formatted_functions, valid_tokens_for_name_func, prompt_text):
+def process_prompt(
+    model: "Small_LLM_Model",
+    token_to_id: dict[str, int],
+    functions: list[FunctionDefinition],
+    formatted_functions: str,
+    valid_tokens_for_name_func: dict[int, str],
+    prompt_text: str,
+) -> dict[str, object]:
+    """Run the full pipeline for one prompt and return {prompt, name, parameters}."""
     full_formatted_prompt = build_full_prompt(formatted_functions, prompt_text)
     encoded_token_prompt_ids = encode_to_ids(model, full_formatted_prompt)
 
