@@ -89,7 +89,7 @@ def find_repeating_tail(
         tail = tokens[-block_len:]
         block = tail[:period]
         if all(
-            tail[i * period : (i + 1) * period] == block
+            tail[i * period:(i + 1) * period] == block
             for i in range(min_repeats)
         ):
             return period
@@ -145,7 +145,7 @@ def constrain_value(
             # Model is stuck looping on the same block: cut it down to a
             # single copy and stop, instead of burning max_tokens on a
             # sequence that will never emit a stop token on its own.
-            del generated[-(period * 3) :]
+            del generated[-(period * 3):]
             stopped = True
             break
 
