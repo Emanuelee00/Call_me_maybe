@@ -52,6 +52,10 @@ def process_prompt(
     json_start = decoded_text.index('{"name"')
     parsed = json.loads(decoded_text[json_start:])
 
+    for key, schema in parameters.items():
+        if schema.type == "number":
+            parsed["parameters"][key] = float(parsed["parameters"][key])
+
     return {
         "prompt": prompt_text,
         "name": parsed["name"],

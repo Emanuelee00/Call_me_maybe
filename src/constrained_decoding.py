@@ -67,6 +67,35 @@ def constrain_functions(
     return prefix, current_ids
 
 
+def find_repeating_tail(
+    tokens: list[int], max_period: int = 12, min_repeats: int = 4
+) -> int | None:
+    """Detect whether the tail of tokens is a block repeated min_repeats times.
+
+    Args:
+        tokens: The generated token ids so far.
+        max_period: Largest block length to check for.
+        min_repeats: How many consecutive copies of a block count as
+            a stuck repetition loop.
+
+    Returns:
+        The block length if the tail is min_repeats consecutive
+        copies of it, else None.
+    """
+    for period in range(1, max_period + 1):
+        block_len = period * min_repeats
+        if len(tokens) < block_len:
+            continue
+        tail = tokens[-block_len:]
+        block = tail[:period]
+        if all(
+            tail[i * period : (i + 1) * period] == block
+            for i in range(min_repeats)
+        ):
+            return period
+    return None
+
+
 def constrain_value(
     model: "Small_LLM_Model",
     encoded_tokens: list[int],
@@ -110,6 +139,15 @@ def constrain_value(
             break
 
         generated.append(best_token_id)
+
+        period = find_repeating_tail(generated)
+        if period is not None:
+            # Model is stuck looping on the same block: cut it down to a
+            # single copy and stop, instead of burning max_tokens on a
+            # sequence that will never emit a stop token on its own.
+            del generated[-(period * 3) :]
+            stopped = True
+            break
 
     if not stopped:
         raise ValueError(
