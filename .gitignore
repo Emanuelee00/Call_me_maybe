@@ -17,3 +17,4 @@ data/correction/
 *:Zone.Identifier
 *.zip
 .mypy_cache/
+.vscode/
